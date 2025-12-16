@@ -1,9 +1,10 @@
 #import "RCTDangerZone.h"
 #import <UIKit/UIKit.h>
 
-// Filter out tiny corner-rounding insets (typically 0-5pt)
-// Home bar is ~21-34pt, notch is ~44-59pt
-static const CGFloat kInsetThreshold = 10.0;
+// Notch is ~44-59pt, home bar is ~21-34pt
+// Anything below this is corner rounding garbage we don't care about
+static const CGFloat kNotchThreshold = 40.0;
+static const CGFloat kHomeBarThreshold = 15.0;
 
 @implementation RCTDangerZone
 
@@ -25,15 +26,59 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     if (!rootVC) return;
 
     UIView *rootView = rootVC.view;
-    [rootView setNeedsLayout];
-    [rootView layoutIfNeeded];
-
     UIEdgeInsets safeArea = rootView.safeAreaInsets;
 
-    CGFloat top = safeArea.top > kInsetThreshold ? safeArea.top : 0;
-    CGFloat bottom = safeArea.bottom > kInsetThreshold ? safeArea.bottom : 0;
-    CGFloat left = safeArea.left > kInsetThreshold ? safeArea.left : 0;
-    CGFloat right = safeArea.right > kInsetThreshold ? safeArea.right : 0;
+    // Get the ACTUAL interface orientation from window scene
+    UIInterfaceOrientation orientation = UIInterfaceOrientationPortrait;
+    if (@available(iOS 13.0, *)) {
+      UIWindowScene *windowScene = window.windowScene;
+      if (windowScene) {
+        orientation = windowScene.interfaceOrientation;
+      }
+    }
+
+    CGFloat top = 0;
+    CGFloat bottom = 0;
+    CGFloat left = 0;
+    CGFloat right = 0;
+
+    // Get the notch value (max of top/left/right that's above threshold)
+    CGFloat notchValue = 0;
+    if (safeArea.top > kNotchThreshold) notchValue = safeArea.top;
+    if (safeArea.left > kNotchThreshold) notchValue = MAX(notchValue, safeArea.left);
+    if (safeArea.right > kNotchThreshold) notchValue = MAX(notchValue, safeArea.right);
+
+    // Get home bar value
+    CGFloat homeBar = safeArea.bottom > kHomeBarThreshold ? safeArea.bottom : 0;
+
+    switch (orientation) {
+      case UIInterfaceOrientationLandscapeLeft:
+        // Home button on LEFT, notch on RIGHT
+        right = notchValue;
+        left = 0;
+        top = 0;
+        bottom = homeBar;
+        break;
+      case UIInterfaceOrientationLandscapeRight:
+        // Home button on RIGHT, notch on LEFT
+        left = notchValue;
+        right = 0;
+        top = 0;
+        bottom = homeBar;
+        break;
+      case UIInterfaceOrientationPortraitUpsideDown:
+        top = 0;
+        bottom = notchValue;
+        left = 0;
+        right = 0;
+        break;
+      default: // Portrait
+        top = notchValue;
+        bottom = homeBar;
+        left = 0;
+        right = 0;
+        break;
+    }
 
     result = @{
       @"top": @(top),
