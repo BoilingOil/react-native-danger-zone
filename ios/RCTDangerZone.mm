@@ -63,10 +63,6 @@ RCT_EXPORT_MODULE(NativeDangerZone)
   return std::make_shared<facebook::react::NativeDangerZoneSpecJSI>(params);
 }
 
-+ (NSString *)moduleName {
-  return @"NativeDangerZone";
-}
-
 + (BOOL)requiresMainQueueSetup {
   return YES;
 }
