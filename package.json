@@ -4,7 +4,7 @@
   "description": "Safe area insets without the bullshit. No event emitters, no providers, just values.",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
-  "types": "lib/typescript/src/index.d.ts",
+  "types": "index.d.ts",
   "react-native": "src/index.ts",
   "source": "src/index.ts",
   "files": [
@@ -13,6 +13,7 @@
     "specs",
     "ios",
     "android",
+    "index.d.ts",
     "react-native-danger-zone.podspec",
     "!**/__tests__"
   ],
