@@ -26,9 +26,10 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     if (!rootVC) return;
 
     UIView *rootView = rootVC.view;
+    CGRect bounds = rootView.bounds;
     UIEdgeInsets safeArea = rootView.safeAreaInsets;
 
-    // Get the ACTUAL interface orientation from window scene
+    // Get the interface orientation from window scene
     UIInterfaceOrientation orientation = UIInterfaceOrientationPortrait;
     if (@available(iOS 13.0, *)) {
       UIWindowScene *windowScene = window.windowScene;
@@ -36,6 +37,10 @@ RCT_EXPORT_MODULE(NativeDangerZone)
         orientation = windowScene.interfaceOrientation;
       }
     }
+
+    // Double-check: if bounds say landscape but orientation says portrait, trust bounds
+    BOOL boundsLandscape = bounds.size.width > bounds.size.height;
+    BOOL orientationLandscape = UIInterfaceOrientationIsLandscape(orientation);
 
     CGFloat top = 0;
     CGFloat bottom = 0;
@@ -51,33 +56,36 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     // Get home bar value
     CGFloat homeBar = safeArea.bottom > kHomeBarThreshold ? safeArea.bottom : 0;
 
-    switch (orientation) {
-      case UIInterfaceOrientationLandscapeLeft:
-        // Home button on LEFT, notch on RIGHT
-        right = notchValue;
-        left = 0;
-        top = 0;
-        bottom = homeBar;
-        break;
-      case UIInterfaceOrientationLandscapeRight:
-        // Home button on RIGHT, notch on LEFT
-        left = notchValue;
-        right = 0;
-        top = 0;
-        bottom = homeBar;
-        break;
-      case UIInterfaceOrientationPortraitUpsideDown:
-        top = 0;
-        bottom = notchValue;
-        left = 0;
-        right = 0;
-        break;
-      default: // Portrait
-        top = notchValue;
-        bottom = homeBar;
-        left = 0;
-        right = 0;
-        break;
+    if (boundsLandscape) {
+      // We're in landscape - figure out which side has the notch
+      if (orientationLandscape) {
+        // Orientation matches bounds, trust it
+        if (orientation == UIInterfaceOrientationLandscapeLeft) {
+          right = notchValue;
+          left = 0;
+        } else {
+          left = notchValue;
+          right = 0;
+        }
+      } else {
+        // Orientation is stale/wrong - use safe area values to determine
+        // The side with the larger inset has the notch
+        if (safeArea.left >= safeArea.right) {
+          left = notchValue;
+          right = 0;
+        } else {
+          right = notchValue;
+          left = 0;
+        }
+      }
+      top = 0;
+      bottom = homeBar;
+    } else {
+      // Portrait
+      top = notchValue;
+      bottom = homeBar;
+      left = 0;
+      right = 0;
     }
 
     result = @{
