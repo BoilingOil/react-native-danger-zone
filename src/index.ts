@@ -35,10 +35,7 @@ export function useInsets(): Insets {
 
   useEffect(() => {
     const update = () => {
-      // Small delay to let iOS update the safe area insets after rotation
-      setTimeout(() => {
-        setInsets(getInsets());
-      }, 50);
+      setInsets(getInsets());
     };
 
     const subscription = Dimensions.addEventListener('change', update);
