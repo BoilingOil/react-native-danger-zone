@@ -1,0 +1,69 @@
+{
+  "name": "react-native-danger-zone",
+  "version": "0.1.0",
+  "description": "Safe area insets without the bullshit. No event emitters, no providers, just values.",
+  "main": "lib/commonjs/index.js",
+  "module": "lib/module/index.js",
+  "types": "lib/typescript/src/index.d.ts",
+  "react-native": "src/index.ts",
+  "source": "src/index.ts",
+  "files": [
+    "src",
+    "lib",
+    "specs",
+    "ios",
+    "android",
+    "react-native-danger-zone.podspec",
+    "!**/__tests__"
+  ],
+  "scripts": {
+    "build": "bob build",
+    "typescript": "tsc --noEmit",
+    "lint": "eslint .",
+    "clean": "del-cli lib"
+  },
+  "keywords": [
+    "react-native",
+    "safe-area",
+    "insets",
+    "notch",
+    "turbomodule"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/boilingoil/react-native-danger-zone.git"
+  },
+  "homepage": "https://github.com/boilingoil/react-native-danger-zone",
+  "author": "boilingoil",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": "*",
+    "react-native": ">=0.76.0"
+  },
+  "devDependencies": {
+    "react-native-builder-bob": "^0.30.0",
+    "typescript": "^5.0.0"
+  },
+  "react-native-builder-bob": {
+    "source": "src",
+    "output": "lib",
+    "targets": [
+      "commonjs",
+      "module",
+      ["typescript", { "project": "tsconfig.build.json" }]
+    ]
+  },
+  "codegenConfig": {
+    "name": "RNDangerZoneSpec",
+    "type": "modules",
+    "jsSrcsDir": "specs",
+    "android": {
+      "javaPackageName": "com.dangerzone"
+    },
+    "ios": {
+      "modulesProvider": {
+        "NativeDangerZone": "RCTDangerZone"
+      }
+    }
+  }
+}
