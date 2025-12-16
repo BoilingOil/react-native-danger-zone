@@ -29,18 +29,34 @@ export function getInsets(): Insets {
 /**
  * Hook that returns insets and auto-updates on orientation change.
  * This is the recommended way to use DangerZone.
+ *
+ * Polls every 200ms to catch landscape-left <-> landscape-right flips
+ * (which don't trigger Dimensions change since width/height stay the same)
  */
 export function useInsets(): Insets {
   const [insets, setInsets] = useState<Insets>(getInsets);
 
   useEffect(() => {
     const update = () => {
-      setInsets(getInsets());
+      const newInsets = getInsets();
+      setInsets(prev => {
+        // Only update if values actually changed
+        if (prev.top !== newInsets.top || prev.bottom !== newInsets.bottom ||
+            prev.left !== newInsets.left || prev.right !== newInsets.right) {
+          return newInsets;
+        }
+        return prev;
+      });
     };
 
+    // Poll every 200ms to catch all rotations including landscape flips
+    const intervalId = setInterval(update, 200);
+
+    // Also check on dimension changes
     const subscription = Dimensions.addEventListener('change', update);
 
     return () => {
+      clearInterval(intervalId);
       subscription.remove();
     };
   }, []);
