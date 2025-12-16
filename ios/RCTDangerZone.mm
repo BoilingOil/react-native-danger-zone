@@ -26,19 +26,19 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     if (!rootVC) return;
 
     UIView *rootView = rootVC.view;
+
+    // Force layout to complete
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    [rootView setNeedsLayout];
+    [rootView layoutIfNeeded];
+    [CATransaction commit];
+    [CATransaction flush];
+
     CGRect bounds = rootView.bounds;
     UIEdgeInsets safeArea = rootView.safeAreaInsets;
 
-    // Get both orientations
     UIDeviceOrientation deviceOrientation = UIDevice.currentDevice.orientation;
-    UIInterfaceOrientation interfaceOrientation = UIInterfaceOrientationPortrait;
-    if (@available(iOS 13.0, *)) {
-      UIWindowScene *windowScene = window.windowScene;
-      if (windowScene) {
-        interfaceOrientation = windowScene.interfaceOrientation;
-      }
-    }
-
     BOOL viewIsLandscape = bounds.size.width > bounds.size.height;
 
     CGFloat top = 0;
@@ -52,17 +52,38 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     if (notchValue < kNotchThreshold) notchValue = 0;
 
     if (viewIsLandscape) {
-      // For landscape, INTERFACE orientation is most reliable for left vs right
-      if (interfaceOrientation == UIInterfaceOrientationLandscapeLeft) {
-        // Home button on left = notch on RIGHT
+      // In landscape, use the ACTUAL safe area values to determine notch side
+      // The side with the larger raw inset has the notch
+      // (Even if they report equal after threshold, the raw values differ slightly)
+      if (safeArea.left > safeArea.right) {
+        left = notchValue;
+      } else if (safeArea.right > safeArea.left) {
         right = notchValue;
       } else {
-        // LandscapeRight or fallback: home button on right = notch on LEFT
-        left = notchValue;
+        // Truly equal - use device orientation as tiebreaker
+        if (deviceOrientation == UIDeviceOrientationLandscapeLeft) {
+          left = notchValue;
+        } else if (deviceOrientation == UIDeviceOrientationLandscapeRight) {
+          right = notchValue;
+        } else {
+          // Last resort - use interface orientation
+          UIInterfaceOrientation interfaceOrientation = UIInterfaceOrientationPortrait;
+          if (@available(iOS 13.0, *)) {
+            UIWindowScene *windowScene = window.windowScene;
+            if (windowScene) {
+              interfaceOrientation = windowScene.interfaceOrientation;
+            }
+          }
+          if (interfaceOrientation == UIInterfaceOrientationLandscapeLeft) {
+            right = notchValue;
+          } else {
+            left = notchValue;
+          }
+        }
       }
       bottom = homeBar;
     } else {
-      // For portrait, DEVICE orientation tells us upside-down
+      // Portrait
       if (deviceOrientation == UIDeviceOrientationPortraitUpsideDown) {
         top = homeBar;
         bottom = notchValue;
