@@ -6,9 +6,25 @@
 static const CGFloat kNotchThreshold = 40.0;
 static const CGFloat kHomeBarThreshold = 15.0;
 
-@implementation RCTDangerZone
+@implementation RCTDangerZone {
+  UIDeviceOrientation _lastKnownOrientation;
+}
 
 RCT_EXPORT_MODULE(NativeDangerZone)
+
+- (instancetype)init {
+  self = [super init];
+  if (self) {
+    // THIS IS CRITICAL - without it, UIDevice.currentDevice.orientation doesn't update!
+    [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
+    _lastKnownOrientation = UIDeviceOrientationPortrait;
+  }
+  return self;
+}
+
+- (void)dealloc {
+  [[UIDevice currentDevice] endGeneratingDeviceOrientationNotifications];
+}
 
 - (NSDictionary *)getInsets {
   __block NSDictionary *result = @{
@@ -26,71 +42,56 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     if (!rootVC) return;
 
     UIView *rootView = rootVC.view;
-
-    // Force layout to complete
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    [rootView setNeedsLayout];
-    [rootView layoutIfNeeded];
-    [CATransaction commit];
-    [CATransaction flush];
-
-    CGRect bounds = rootView.bounds;
     UIEdgeInsets safeArea = rootView.safeAreaInsets;
 
+    // Get device orientation - use cached value if flat/unknown
     UIDeviceOrientation deviceOrientation = UIDevice.currentDevice.orientation;
-    BOOL viewIsLandscape = bounds.size.width > bounds.size.height;
+    switch (deviceOrientation) {
+      case UIDeviceOrientationPortrait:
+      case UIDeviceOrientationPortraitUpsideDown:
+      case UIDeviceOrientationLandscapeLeft:
+      case UIDeviceOrientationLandscapeRight:
+        // Valid orientation - cache it
+        self->_lastKnownOrientation = deviceOrientation;
+        break;
+      default:
+        // FaceUp, FaceDown, Unknown - use cached value
+        deviceOrientation = self->_lastKnownOrientation;
+        break;
+    }
 
     CGFloat top = 0;
     CGFloat bottom = 0;
     CGFloat left = 0;
     CGFloat right = 0;
 
-    // Get actual values from iOS
+    // Get the notch value from whichever edge has it
     CGFloat notchValue = MAX(MAX(safeArea.top, safeArea.left), safeArea.right);
     CGFloat homeBar = safeArea.bottom > kHomeBarThreshold ? safeArea.bottom : 0;
     if (notchValue < kNotchThreshold) notchValue = 0;
 
-    if (viewIsLandscape) {
-      // In landscape, use the ACTUAL safe area values to determine notch side
-      // The side with the larger raw inset has the notch
-      // (Even if they report equal after threshold, the raw values differ slightly)
-      if (safeArea.left > safeArea.right) {
+    // Use device orientation to determine where the notch physically is
+    switch (deviceOrientation) {
+      case UIDeviceOrientationLandscapeLeft:
+        // Device rotated left = notch on LEFT
         left = notchValue;
-      } else if (safeArea.right > safeArea.left) {
+        bottom = homeBar;
+        break;
+      case UIDeviceOrientationLandscapeRight:
+        // Device rotated right = notch on RIGHT
         right = notchValue;
-      } else {
-        // Truly equal - use device orientation as tiebreaker
-        if (deviceOrientation == UIDeviceOrientationLandscapeLeft) {
-          left = notchValue;
-        } else if (deviceOrientation == UIDeviceOrientationLandscapeRight) {
-          right = notchValue;
-        } else {
-          // Last resort - use interface orientation
-          UIInterfaceOrientation interfaceOrientation = UIInterfaceOrientationPortrait;
-          if (@available(iOS 13.0, *)) {
-            UIWindowScene *windowScene = window.windowScene;
-            if (windowScene) {
-              interfaceOrientation = windowScene.interfaceOrientation;
-            }
-          }
-          if (interfaceOrientation == UIInterfaceOrientationLandscapeLeft) {
-            right = notchValue;
-          } else {
-            left = notchValue;
-          }
-        }
-      }
-      bottom = homeBar;
-    } else {
-      // Portrait
-      if (deviceOrientation == UIDeviceOrientationPortraitUpsideDown) {
+        bottom = homeBar;
+        break;
+      case UIDeviceOrientationPortraitUpsideDown:
+        // Upside down = notch at BOTTOM
         top = homeBar;
         bottom = notchValue;
-      } else {
+        break;
+      default:
+        // Portrait = notch at TOP
         top = notchValue;
         bottom = homeBar;
-      }
+        break;
     }
 
     result = @{
