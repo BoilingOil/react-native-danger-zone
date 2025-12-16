@@ -26,91 +26,50 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     if (!rootVC) return;
 
     UIView *rootView = rootVC.view;
+    CGRect bounds = rootView.bounds;
     UIEdgeInsets safeArea = rootView.safeAreaInsets;
 
-    // Use DEVICE orientation - this is the physical position of the device
-    // iOS can't hide this from us even if it refuses to rotate the interface
+    // Get both orientations
     UIDeviceOrientation deviceOrientation = UIDevice.currentDevice.orientation;
+    UIInterfaceOrientation interfaceOrientation = UIInterfaceOrientationPortrait;
+    if (@available(iOS 13.0, *)) {
+      UIWindowScene *windowScene = window.windowScene;
+      if (windowScene) {
+        interfaceOrientation = windowScene.interfaceOrientation;
+      }
+    }
+
+    BOOL viewIsLandscape = bounds.size.width > bounds.size.height;
 
     CGFloat top = 0;
     CGFloat bottom = 0;
     CGFloat left = 0;
     CGFloat right = 0;
 
-    // Get the notch value (max of any edge that's above threshold)
-    CGFloat notchValue = 0;
-    if (safeArea.top > kNotchThreshold) notchValue = safeArea.top;
-    if (safeArea.left > kNotchThreshold) notchValue = MAX(notchValue, safeArea.left);
-    if (safeArea.right > kNotchThreshold) notchValue = MAX(notchValue, safeArea.right);
-
-    // If we still don't have a notch value, device might be in portrait with Dynamic Island
-    // Use a reasonable default
-    if (notchValue == 0) notchValue = 59.0;
-
-    // Get home bar value
+    // Get actual values from iOS
+    CGFloat notchValue = MAX(MAX(safeArea.top, safeArea.left), safeArea.right);
     CGFloat homeBar = safeArea.bottom > kHomeBarThreshold ? safeArea.bottom : 0;
-    if (homeBar == 0) homeBar = 34.0; // Default home bar for Face ID devices
+    if (notchValue < kNotchThreshold) notchValue = 0;
 
-    // Device orientation tells us exactly where the notch physically is
-    // Note: Device orientation is from the device's perspective, not the UI's
-    switch (deviceOrientation) {
-      case UIDeviceOrientationLandscapeLeft:
-        // Device rotated left = notch is on LEFT side of screen
-        left = notchValue;
-        right = 0;
-        top = 0;
-        bottom = homeBar;
-        break;
-      case UIDeviceOrientationLandscapeRight:
-        // Device rotated right = notch is on RIGHT side of screen
+    if (viewIsLandscape) {
+      // For landscape, INTERFACE orientation is most reliable for left vs right
+      if (interfaceOrientation == UIInterfaceOrientationLandscapeLeft) {
+        // Home button on left = notch on RIGHT
         right = notchValue;
-        left = 0;
-        top = 0;
-        bottom = homeBar;
-        break;
-      case UIDeviceOrientationPortraitUpsideDown:
-        // Upside down = notch at BOTTOM (even though iOS won't rotate to this)
+      } else {
+        // LandscapeRight or fallback: home button on right = notch on LEFT
+        left = notchValue;
+      }
+      bottom = homeBar;
+    } else {
+      // For portrait, DEVICE orientation tells us upside-down
+      if (deviceOrientation == UIDeviceOrientationPortraitUpsideDown) {
         top = homeBar;
         bottom = notchValue;
-        left = 0;
-        right = 0;
-        break;
-      case UIDeviceOrientationFaceUp:
-      case UIDeviceOrientationFaceDown:
-      case UIDeviceOrientationUnknown:
-        // Device flat or unknown - fall back to interface orientation
-        {
-          UIInterfaceOrientation interfaceOrientation = UIInterfaceOrientationPortrait;
-          if (@available(iOS 13.0, *)) {
-            UIWindowScene *windowScene = window.windowScene;
-            if (windowScene) {
-              interfaceOrientation = windowScene.interfaceOrientation;
-            }
-          }
-          if (interfaceOrientation == UIInterfaceOrientationLandscapeLeft) {
-            right = notchValue;
-            left = 0;
-            top = 0;
-            bottom = homeBar;
-          } else if (interfaceOrientation == UIInterfaceOrientationLandscapeRight) {
-            left = notchValue;
-            right = 0;
-            top = 0;
-            bottom = homeBar;
-          } else {
-            top = notchValue;
-            bottom = homeBar;
-            left = 0;
-            right = 0;
-          }
-        }
-        break;
-      default: // Portrait
+      } else {
         top = notchValue;
         bottom = homeBar;
-        left = 0;
-        right = 0;
-        break;
+      }
     }
 
     result = @{
