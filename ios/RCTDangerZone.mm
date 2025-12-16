@@ -1,9 +1,9 @@
 #import "RCTDangerZone.h"
 #import <UIKit/UIKit.h>
 
-// Only report insets above this threshold (filters out corner rounding)
-// Notch is ~44-59pt, home bar is ~34pt, corner rounding is ~0-20pt
-static const CGFloat kInsetThreshold = 24.0;
+// Filter out tiny corner-rounding insets (typically 0-5pt)
+// Home bar is ~21-34pt, notch is ~44-59pt
+static const CGFloat kInsetThreshold = 10.0;
 
 @implementation RCTDangerZone
 
@@ -19,24 +19,28 @@ RCT_EXPORT_MODULE(NativeDangerZone)
 
   void (^fetchInsets)(void) = ^{
     UIWindow *window = [self getKeyWindow];
+    if (!window) return;
 
-    if (window) {
-      [window layoutIfNeeded];
-      UIEdgeInsets safeArea = window.safeAreaInsets;
+    UIViewController *rootVC = window.rootViewController;
+    if (!rootVC) return;
 
-      // Only report significant insets (notch, home bar) - ignore corner rounding
-      CGFloat top = safeArea.top >= kInsetThreshold ? safeArea.top : 0;
-      CGFloat bottom = safeArea.bottom >= kInsetThreshold ? safeArea.bottom : 0;
-      CGFloat left = safeArea.left >= kInsetThreshold ? safeArea.left : 0;
-      CGFloat right = safeArea.right >= kInsetThreshold ? safeArea.right : 0;
+    UIView *rootView = rootVC.view;
+    [rootView setNeedsLayout];
+    [rootView layoutIfNeeded];
 
-      result = @{
-        @"top": @(top),
-        @"bottom": @(bottom),
-        @"left": @(left),
-        @"right": @(right)
-      };
-    }
+    UIEdgeInsets safeArea = rootView.safeAreaInsets;
+
+    CGFloat top = safeArea.top > kInsetThreshold ? safeArea.top : 0;
+    CGFloat bottom = safeArea.bottom > kInsetThreshold ? safeArea.bottom : 0;
+    CGFloat left = safeArea.left > kInsetThreshold ? safeArea.left : 0;
+    CGFloat right = safeArea.right > kInsetThreshold ? safeArea.right : 0;
+
+    result = @{
+      @"top": @(top),
+      @"bottom": @(bottom),
+      @"left": @(left),
+      @"right": @(right)
+    };
   };
 
   if ([NSThread isMainThread]) {
