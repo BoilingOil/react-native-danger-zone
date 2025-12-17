@@ -30,33 +30,92 @@ export function getInsets(): Insets {
  * Hook that returns insets and auto-updates on orientation change.
  * This is the recommended way to use DangerZone.
  *
- * Polls every 200ms to catch landscape-left <-> landscape-right flips
- * (which don't trigger Dimensions change since width/height stay the same)
+ * - Fast polling (50ms) during dimension changes for smooth transitions
+ * - Slow polling (500ms) in landscape to catch left<->right flips
+ * - No polling in portrait (no flips possible)
  */
 export function useInsets(): Insets {
   const [insets, setInsets] = useState<Insets>(getInsets);
 
   useEffect(() => {
-    const update = () => {
-      const newInsets = getInsets();
-      setInsets(prev => {
-        // Only update if values actually changed
-        if (prev.top !== newInsets.top || prev.bottom !== newInsets.bottom ||
-            prev.left !== newInsets.left || prev.right !== newInsets.right) {
-          return newInsets;
-        }
-        return prev;
-      });
+    let fastPollingId: ReturnType<typeof setInterval> | null = null;
+    let slowPollingId: ReturnType<typeof setInterval> | null = null;
+    let stabilizeTimeout: ReturnType<typeof setTimeout> | null = null;
+    let lastInsets = getInsets();
+
+    const isLandscape = () => {
+      const { width, height } = Dimensions.get('window');
+      return width > height;
     };
 
-    // Poll every 200ms to catch all rotations including landscape flips
-    const intervalId = setInterval(update, 200);
+    const updateInsets = () => {
+      const newInsets = getInsets();
+      if (lastInsets.top !== newInsets.top || lastInsets.bottom !== newInsets.bottom ||
+          lastInsets.left !== newInsets.left || lastInsets.right !== newInsets.right) {
+        lastInsets = newInsets;
+        setInsets(newInsets);
+      }
+    };
 
-    // Also check on dimension changes
-    const subscription = Dimensions.addEventListener('change', update);
+    const stopFastPolling = () => {
+      if (fastPollingId) {
+        clearInterval(fastPollingId);
+        fastPollingId = null;
+      }
+      if (stabilizeTimeout) {
+        clearTimeout(stabilizeTimeout);
+        stabilizeTimeout = null;
+      }
+      updateInsets();
+      // Start slow polling if in landscape
+      startSlowPollingIfLandscape();
+    };
+
+    const startFastPolling = () => {
+      // Stop slow polling during fast polling
+      if (slowPollingId) {
+        clearInterval(slowPollingId);
+        slowPollingId = null;
+      }
+
+      // Already fast polling? Just extend timeout
+      if (fastPollingId) {
+        if (stabilizeTimeout) clearTimeout(stabilizeTimeout);
+        stabilizeTimeout = setTimeout(stopFastPolling, 800);
+        return;
+      }
+
+      fastPollingId = setInterval(updateInsets, 50);
+      stabilizeTimeout = setTimeout(stopFastPolling, 800);
+    };
+
+    const startSlowPollingIfLandscape = () => {
+      if (slowPollingId) return; // Already slow polling
+      if (!isLandscape()) return; // Portrait - no need
+
+      // Poll every 500ms in landscape to catch flips
+      slowPollingId = setInterval(updateInsets, 500);
+    };
+
+    const stopSlowPolling = () => {
+      if (slowPollingId) {
+        clearInterval(slowPollingId);
+        slowPollingId = null;
+      }
+    };
+
+    // Start polling when dimensions change
+    const subscription = Dimensions.addEventListener('change', () => {
+      startFastPolling();
+    });
+
+    // Initial fetch and start slow polling if needed
+    updateInsets();
+    startSlowPollingIfLandscape();
 
     return () => {
-      clearInterval(intervalId);
+      stopFastPolling();
+      stopSlowPolling();
       subscription.remove();
     };
   }, []);
