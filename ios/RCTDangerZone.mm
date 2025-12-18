@@ -42,6 +42,7 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     if (!rootVC) return;
 
     UIView *rootView = rootVC.view;
+    CGRect bounds = rootView.bounds;
     UIEdgeInsets safeArea = rootView.safeAreaInsets;
 
     // Get device orientation - use cached value if flat/unknown
@@ -60,38 +61,48 @@ RCT_EXPORT_MODULE(NativeDangerZone)
         break;
     }
 
+    BOOL viewIsLandscape = bounds.size.width > bounds.size.height;
+
     CGFloat top = 0;
     CGFloat bottom = 0;
     CGFloat left = 0;
     CGFloat right = 0;
 
-    // Get the notch value from whichever edge has it
-    CGFloat notchValue = MAX(MAX(safeArea.top, safeArea.left), safeArea.right);
-    CGFloat homeBar = safeArea.bottom > kHomeBarThreshold ? safeArea.bottom : 0;
-    if (notchValue < kNotchThreshold) notchValue = 0;
+    // For upside down: iOS keeps view in portrait, so use portrait safe area values
+    // and swap top/bottom ourselves
+    if (deviceOrientation == UIDeviceOrientationPortraitUpsideDown && !viewIsLandscape) {
+      // Device is upside down and view is portrait - swap top and bottom
+      CGFloat notchValue = safeArea.top > kNotchThreshold ? safeArea.top : 0;
+      CGFloat homeBar = safeArea.bottom > kHomeBarThreshold ? safeArea.bottom : 0;
+      top = homeBar;      // Home bar now at top
+      bottom = notchValue; // Notch now at bottom
+    }
+    else if (viewIsLandscape) {
+      // Landscape - notch on left or right
+      CGFloat notchValue = MAX(safeArea.left, safeArea.right);
+      if (notchValue < kNotchThreshold) notchValue = 0;
+      CGFloat homeBar = safeArea.bottom > kHomeBarThreshold ? safeArea.bottom : 0;
 
-    // Use device orientation to determine where the notch physically is
-    switch (deviceOrientation) {
-      case UIDeviceOrientationLandscapeLeft:
-        // Device rotated left = notch on LEFT
+      if (deviceOrientation == UIDeviceOrientationLandscapeLeft) {
         left = notchValue;
-        bottom = homeBar;
-        break;
-      case UIDeviceOrientationLandscapeRight:
-        // Device rotated right = notch on RIGHT
+      } else if (deviceOrientation == UIDeviceOrientationLandscapeRight) {
         right = notchValue;
-        bottom = homeBar;
-        break;
-      case UIDeviceOrientationPortraitUpsideDown:
-        // Upside down = notch at BOTTOM
-        top = homeBar;
-        bottom = notchValue;
-        break;
-      default:
-        // Portrait = notch at TOP
-        top = notchValue;
-        bottom = homeBar;
-        break;
+      } else {
+        // Device says portrait but view is landscape - use safe area to determine
+        if (safeArea.left > safeArea.right) {
+          left = notchValue;
+        } else {
+          right = notchValue;
+        }
+      }
+      bottom = homeBar;
+    }
+    else {
+      // Portrait (normal)
+      CGFloat notchValue = safeArea.top > kNotchThreshold ? safeArea.top : 0;
+      CGFloat homeBar = safeArea.bottom > kHomeBarThreshold ? safeArea.bottom : 0;
+      top = notchValue;
+      bottom = homeBar;
     }
 
     result = @{
