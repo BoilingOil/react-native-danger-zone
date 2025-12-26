@@ -5,6 +5,10 @@
 static const CGFloat kNotchThreshold = 40.0;
 static const CGFloat kHomeBarThreshold = 15.0;
 
+// Hysteresis threshold - must exceed this to change orientation
+// Prevents jitter at 45° boundaries
+static const double kOrientationThreshold = 0.2;
+
 typedef NS_ENUM(NSInteger, NotchPosition) {
   NotchPositionTop,
   NotchPositionBottom,
@@ -15,6 +19,7 @@ typedef NS_ENUM(NSInteger, NotchPosition) {
 @implementation RCTDangerZone {
   CMMotionManager *_motionManager;
   NotchPosition _lastKnownPosition;
+  BOOL _hasMotionData;
 }
 
 RCT_EXPORT_MODULE(NativeDangerZone)
@@ -23,48 +28,81 @@ RCT_EXPORT_MODULE(NativeDangerZone)
   self = [super init];
   if (self) {
     _motionManager = [[CMMotionManager alloc] init];
-    _motionManager.deviceMotionUpdateInterval = 0.1;
-    [_motionManager startDeviceMotionUpdates];
     _lastKnownPosition = NotchPositionTop;
+    _hasMotionData = NO;
+
+    if (_motionManager.isDeviceMotionAvailable) {
+      _motionManager.deviceMotionUpdateInterval = 0.05; // 50ms for responsive updates
+      [_motionManager startDeviceMotionUpdates];
+    }
+
+    // Also enable UIDevice orientation for fallback
+    [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
   }
   return self;
 }
 
 - (void)dealloc {
   [_motionManager stopDeviceMotionUpdates];
+  [[UIDevice currentDevice] endGeneratingDeviceOrientationNotifications];
 }
 
-- (NotchPosition)getNotchPositionFromGravity {
+- (NotchPosition)getNotchPositionFromMotion {
   CMDeviceMotion *motion = _motionManager.deviceMotion;
   if (!motion) {
     return _lastKnownPosition;
   }
 
-  // Gravity vector: points toward Earth
+  _hasMotionData = YES;
+
+  // Gravity vector points toward Earth
   // x: positive = right side down, negative = left side down
   // y: positive = bottom down (normal portrait), negative = top down (upside down)
-  // z: positive = face down, negative = face up
   double x = motion.gravity.x;
   double y = motion.gravity.y;
 
-  // Determine orientation based on which axis has stronger gravity component
-  if (fabs(y) > fabs(x)) {
-    // More portrait than landscape
-    if (y > 0) {
-      _lastKnownPosition = NotchPositionTop;      // Normal portrait
-    } else {
-      _lastKnownPosition = NotchPositionBottom;   // Upside down
-    }
-  } else {
-    // More landscape than portrait
-    if (x > 0) {
-      _lastKnownPosition = NotchPositionLeft;     // Landscape right (notch on left)
-    } else {
-      _lastKnownPosition = NotchPositionRight;    // Landscape left (notch on right)
-    }
-  }
+  double absX = fabs(x);
+  double absY = fabs(y);
 
-  return _lastKnownPosition;
+  // Only change orientation if we clearly exceed threshold
+  // This prevents jitter at boundaries
+  NotchPosition newPosition = _lastKnownPosition;
+
+  if (absY > absX + kOrientationThreshold) {
+    // Clearly portrait
+    newPosition = (y > 0) ? NotchPositionTop : NotchPositionBottom;
+  } else if (absX > absY + kOrientationThreshold) {
+    // Clearly landscape
+    newPosition = (x > 0) ? NotchPositionLeft : NotchPositionRight;
+  }
+  // else: in the "dead zone" near 45°, keep previous orientation
+
+  _lastKnownPosition = newPosition;
+  return newPosition;
+}
+
+- (NotchPosition)getNotchPositionFromUIDevice:(BOOL)viewIsLandscape safeArea:(UIEdgeInsets)safeArea {
+  UIDeviceOrientation orientation = UIDevice.currentDevice.orientation;
+
+  switch (orientation) {
+    case UIDeviceOrientationPortrait:
+      return NotchPositionTop;
+    case UIDeviceOrientationPortraitUpsideDown:
+      return NotchPositionBottom;
+    case UIDeviceOrientationLandscapeLeft:
+      // Device rotated left = notch on right side of screen
+      return NotchPositionRight;
+    case UIDeviceOrientationLandscapeRight:
+      // Device rotated right = notch on left side of screen
+      return NotchPositionLeft;
+    default:
+      // FaceUp, FaceDown, Unknown - use view geometry
+      if (viewIsLandscape) {
+        // In landscape, check which side has the notch via safe area
+        return (safeArea.left > safeArea.right) ? NotchPositionLeft : NotchPositionRight;
+      }
+      return _lastKnownPosition;
+  }
 }
 
 - (NSDictionary *)getInsets {
@@ -75,9 +113,6 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     @"right": @0
   };
 
-  // Get notch position from accelerometer (works even when flat)
-  NotchPosition notchPosition = [self getNotchPositionFromGravity];
-
   void (^fetchInsets)(void) = ^{
     UIWindow *window = [self getKeyWindow];
     if (!window) return;
@@ -86,14 +121,37 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     if (!rootVC) return;
 
     UIView *rootView = rootVC.view;
+    CGRect bounds = rootView.bounds;
     UIEdgeInsets safeArea = rootView.safeAreaInsets;
+    BOOL viewIsLandscape = bounds.size.width > bounds.size.height;
 
-    // Get the notch value (the larger of top/left/right safe areas)
-    CGFloat notchValue = MAX(safeArea.top, MAX(safeArea.left, safeArea.right));
+    // Try CoreMotion first (works for upside-down on real device)
+    // Fall back to UIDevice (works for simulator and basic orientations)
+    NotchPosition notchPosition;
+    if (self->_hasMotionData || self->_motionManager.deviceMotion != nil) {
+      notchPosition = [self getNotchPositionFromMotion];
+    } else {
+      notchPosition = [self getNotchPositionFromUIDevice:viewIsLandscape safeArea:safeArea];
+      self->_lastKnownPosition = notchPosition;
+    }
+
+    // Calculate notch value from safe area
+    CGFloat notchValue = 0;
+    CGFloat homeBar = 0;
+
+    if (viewIsLandscape) {
+      // In landscape, notch is on left or right
+      notchValue = MAX(safeArea.left, safeArea.right);
+      homeBar = safeArea.bottom;
+    } else {
+      // In portrait, notch is top (or bottom if upside down, but iOS reports same)
+      notchValue = safeArea.top;
+      homeBar = safeArea.bottom;
+    }
+
+    // Apply thresholds
     if (notchValue < kNotchThreshold) notchValue = 0;
-
-    // Get home bar value
-    CGFloat homeBar = safeArea.bottom > kHomeBarThreshold ? safeArea.bottom : 0;
+    if (homeBar < kHomeBarThreshold) homeBar = 0;
 
     CGFloat top = 0, bottom = 0, left = 0, right = 0;
 
