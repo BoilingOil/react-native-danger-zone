@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import <CoreMotion/CoreMotion.h>
 #import <RNDangerZoneSpec/RNDangerZoneSpec.h>
 
 NS_ASSUME_NONNULL_BEGIN

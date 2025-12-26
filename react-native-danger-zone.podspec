@@ -14,6 +14,7 @@ Pod::Spec.new do |s|
   s.source       = { :git => package['repository']['url'], :tag => "v#{s.version}" }
 
   s.source_files = "ios/**/*.{h,m,mm}"
+  s.frameworks   = "CoreMotion"
 
   install_modules_dependencies(s)
 end

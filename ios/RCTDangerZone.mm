@@ -2,12 +2,19 @@
 #import <UIKit/UIKit.h>
 
 // Notch is ~44-59pt, home bar is ~21-34pt
-// Anything below this is corner rounding garbage we don't care about
 static const CGFloat kNotchThreshold = 40.0;
 static const CGFloat kHomeBarThreshold = 15.0;
 
+typedef NS_ENUM(NSInteger, NotchPosition) {
+  NotchPositionTop,
+  NotchPositionBottom,
+  NotchPositionLeft,
+  NotchPositionRight
+};
+
 @implementation RCTDangerZone {
-  UIDeviceOrientation _lastKnownOrientation;
+  CMMotionManager *_motionManager;
+  NotchPosition _lastKnownPosition;
 }
 
 RCT_EXPORT_MODULE(NativeDangerZone)
@@ -15,15 +22,49 @@ RCT_EXPORT_MODULE(NativeDangerZone)
 - (instancetype)init {
   self = [super init];
   if (self) {
-    // THIS IS CRITICAL - without it, UIDevice.currentDevice.orientation doesn't update!
-    [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
-    _lastKnownOrientation = UIDeviceOrientationPortrait;
+    _motionManager = [[CMMotionManager alloc] init];
+    _motionManager.deviceMotionUpdateInterval = 0.1;
+    [_motionManager startDeviceMotionUpdates];
+    _lastKnownPosition = NotchPositionTop;
   }
   return self;
 }
 
 - (void)dealloc {
-  [[UIDevice currentDevice] endGeneratingDeviceOrientationNotifications];
+  [_motionManager stopDeviceMotionUpdates];
+}
+
+- (NotchPosition)getNotchPositionFromGravity {
+  CMDeviceMotion *motion = _motionManager.deviceMotion;
+  if (!motion) {
+    return _lastKnownPosition;
+  }
+
+  // Gravity vector: points toward Earth
+  // x: positive = right side down, negative = left side down
+  // y: positive = bottom down (normal portrait), negative = top down (upside down)
+  // z: positive = face down, negative = face up
+  double x = motion.gravity.x;
+  double y = motion.gravity.y;
+
+  // Determine orientation based on which axis has stronger gravity component
+  if (fabs(y) > fabs(x)) {
+    // More portrait than landscape
+    if (y > 0) {
+      _lastKnownPosition = NotchPositionTop;      // Normal portrait
+    } else {
+      _lastKnownPosition = NotchPositionBottom;   // Upside down
+    }
+  } else {
+    // More landscape than portrait
+    if (x > 0) {
+      _lastKnownPosition = NotchPositionLeft;     // Landscape right (notch on left)
+    } else {
+      _lastKnownPosition = NotchPositionRight;    // Landscape left (notch on right)
+    }
+  }
+
+  return _lastKnownPosition;
 }
 
 - (NSDictionary *)getInsets {
@@ -34,6 +75,9 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     @"right": @0
   };
 
+  // Get notch position from accelerometer (works even when flat)
+  NotchPosition notchPosition = [self getNotchPositionFromGravity];
+
   void (^fetchInsets)(void) = ^{
     UIWindow *window = [self getKeyWindow];
     if (!window) return;
@@ -42,79 +86,34 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     if (!rootVC) return;
 
     UIView *rootView = rootVC.view;
-    CGRect bounds = rootView.bounds;
     UIEdgeInsets safeArea = rootView.safeAreaInsets;
 
-    BOOL viewIsLandscape = bounds.size.width > bounds.size.height;
+    // Get the notch value (the larger of top/left/right safe areas)
+    CGFloat notchValue = MAX(safeArea.top, MAX(safeArea.left, safeArea.right));
+    if (notchValue < kNotchThreshold) notchValue = 0;
 
-    // Get device orientation - use cached value if flat/unknown
-    UIDeviceOrientation deviceOrientation = UIDevice.currentDevice.orientation;
-    switch (deviceOrientation) {
-      case UIDeviceOrientationPortrait:
-      case UIDeviceOrientationPortraitUpsideDown:
-      case UIDeviceOrientationLandscapeLeft:
-      case UIDeviceOrientationLandscapeRight:
-        // Valid orientation - cache it
-        self->_lastKnownOrientation = deviceOrientation;
+    // Get home bar value
+    CGFloat homeBar = safeArea.bottom > kHomeBarThreshold ? safeArea.bottom : 0;
+
+    CGFloat top = 0, bottom = 0, left = 0, right = 0;
+
+    switch (notchPosition) {
+      case NotchPositionTop:
+        top = notchValue;
+        bottom = homeBar;
         break;
-      default:
-        // FaceUp, FaceDown, Unknown - use cached value BUT
-        // if cached is landscape and view is portrait, the cache is stale
-        // (we transitioned through landscape to portrait/upside-down while flat)
-        if (!viewIsLandscape &&
-            (self->_lastKnownOrientation == UIDeviceOrientationLandscapeLeft ||
-             self->_lastKnownOrientation == UIDeviceOrientationLandscapeRight)) {
-          // When flat during landscape->portrait transition, we can't tell if
-          // it's normal portrait or upside-down. Default to portrait; the 50ms
-          // polling will catch the correct orientation once device tilts enough.
-          deviceOrientation = UIDeviceOrientationPortrait;
-          self->_lastKnownOrientation = UIDeviceOrientationPortrait;
-        } else {
-          deviceOrientation = self->_lastKnownOrientation;
-        }
+      case NotchPositionBottom:
+        bottom = notchValue;
+        top = homeBar;
         break;
-    }
-
-    CGFloat top = 0;
-    CGFloat bottom = 0;
-    CGFloat left = 0;
-    CGFloat right = 0;
-
-    // For upside down: iOS keeps view in portrait, so use portrait safe area values
-    // and swap top/bottom ourselves
-    if (deviceOrientation == UIDeviceOrientationPortraitUpsideDown && !viewIsLandscape) {
-      // Device is upside down and view is portrait - swap top and bottom
-      CGFloat notchValue = safeArea.top > kNotchThreshold ? safeArea.top : 0;
-      CGFloat homeBar = safeArea.bottom > kHomeBarThreshold ? safeArea.bottom : 0;
-      top = homeBar;      // Home bar now at top
-      bottom = notchValue; // Notch now at bottom
-    }
-    else if (viewIsLandscape) {
-      // Landscape - notch on left or right
-      CGFloat notchValue = MAX(safeArea.left, safeArea.right);
-      if (notchValue < kNotchThreshold) notchValue = 0;
-      CGFloat homeBar = safeArea.bottom > kHomeBarThreshold ? safeArea.bottom : 0;
-
-      if (deviceOrientation == UIDeviceOrientationLandscapeLeft) {
+      case NotchPositionLeft:
         left = notchValue;
-      } else if (deviceOrientation == UIDeviceOrientationLandscapeRight) {
+        bottom = homeBar;
+        break;
+      case NotchPositionRight:
         right = notchValue;
-      } else {
-        // Device says portrait but view is landscape - use safe area to determine
-        if (safeArea.left > safeArea.right) {
-          left = notchValue;
-        } else {
-          right = notchValue;
-        }
-      }
-      bottom = homeBar;
-    }
-    else {
-      // Portrait (normal)
-      CGFloat notchValue = safeArea.top > kNotchThreshold ? safeArea.top : 0;
-      CGFloat homeBar = safeArea.bottom > kHomeBarThreshold ? safeArea.bottom : 0;
-      top = notchValue;
-      bottom = homeBar;
+        bottom = homeBar;
+        break;
     }
 
     result = @{
