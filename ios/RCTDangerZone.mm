@@ -58,28 +58,38 @@ RCT_EXPORT_MODULE(NativeDangerZone)
   }
 
   // 2. UIDevice orientation (reports upside-down on iPhone, unlike interfaceOrientation)
-  switch (UIDevice.currentDevice.orientation) {
+  UIDeviceOrientation deviceOrient = UIDevice.currentDevice.orientation;
+  switch (deviceOrient) {
     case UIDeviceOrientationPortrait:
       return NotchPositionTop;
     case UIDeviceOrientationPortraitUpsideDown:
       return NotchPositionBottom;
     case UIDeviceOrientationLandscapeLeft:
-      return NotchPositionRight;  // home button left = notch right
+      return NotchPositionRight;
     case UIDeviceOrientationLandscapeRight:
-      return NotchPositionLeft;   // home button right = notch left
+      return NotchPositionLeft;
     default:
       break;
   }
 
-  // 3. interfaceOrientation (simulator fallback - no upside-down support)
+  // 3. interfaceOrientation (simulator) - Apple refuses to report upside-down for iPhone
+  //    but we handle it anyway because fuck incomplete APIs
   if (@available(iOS 13.0, *)) {
     UIWindowScene *scene = window.windowScene;
     if (scene) {
-      switch (scene.interfaceOrientation) {
+      UIInterfaceOrientation interfaceOrient = scene.interfaceOrientation;
+
+      // Apple's interfaceOrientation for iPhone never returns PortraitUpsideDown
+      // So if UIDevice says upside-down but interface says portrait, trust UIDevice
+      if (deviceOrient == UIDeviceOrientationPortraitUpsideDown) {
+        return NotchPositionBottom;
+      }
+
+      switch (interfaceOrient) {
         case UIInterfaceOrientationPortrait:
           return NotchPositionTop;
         case UIInterfaceOrientationPortraitUpsideDown:
-          return NotchPositionBottom;
+          return NotchPositionBottom;  // Apple never sends this for iPhone but we're ready
         case UIInterfaceOrientationLandscapeLeft:
           return NotchPositionRight;
         case UIInterfaceOrientationLandscapeRight:
