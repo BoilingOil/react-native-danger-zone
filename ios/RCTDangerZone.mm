@@ -28,17 +28,20 @@ RCT_EXPORT_MODULE(NativeDangerZone)
       _motionManager.deviceMotionUpdateInterval = 0.05;
       [_motionManager startDeviceMotionUpdates];
     }
+    // Required for UIDevice.orientation to update (fallback for upside-down)
+    [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
   }
   return self;
 }
 
 - (void)dealloc {
   [_motionManager stopDeviceMotionUpdates];
+  [[UIDevice currentDevice] endGeneratingDeviceOrientationNotifications];
 }
 
 // Single source of truth for notch position
 - (NotchPosition)getNotchPosition:(UIWindow *)window {
-  // Try CoreMotion first (works for upside-down, real device only)
+  // 1. CoreMotion (best - works for all orientations on real device)
   CMDeviceMotion *motion = _motionManager.deviceMotion;
   if (motion) {
     double x = motion.gravity.x;
@@ -46,18 +49,29 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     double absX = fabs(x);
     double absY = fabs(y);
 
-    // Only update if clearly in one orientation (hysteresis)
     if (absY > absX + kHysteresis) {
-      // Portrait: y < 0 = normal, y > 0 = upside down
       _lastPosition = (y < 0) ? NotchPositionTop : NotchPositionBottom;
     } else if (absX > absY + kHysteresis) {
-      // Landscape: x > 0 = right side down = notch right, x < 0 = notch left
       _lastPosition = (x > 0) ? NotchPositionRight : NotchPositionLeft;
     }
     return _lastPosition;
   }
 
-  // Fallback: interfaceOrientation (simulator, or CoreMotion not ready)
+  // 2. UIDevice orientation (reports upside-down on iPhone, unlike interfaceOrientation)
+  switch (UIDevice.currentDevice.orientation) {
+    case UIDeviceOrientationPortrait:
+      return NotchPositionTop;
+    case UIDeviceOrientationPortraitUpsideDown:
+      return NotchPositionBottom;
+    case UIDeviceOrientationLandscapeLeft:
+      return NotchPositionRight;  // home button left = notch right
+    case UIDeviceOrientationLandscapeRight:
+      return NotchPositionLeft;   // home button right = notch left
+    default:
+      break;
+  }
+
+  // 3. interfaceOrientation (simulator fallback - no upside-down support)
   if (@available(iOS 13.0, *)) {
     UIWindowScene *scene = window.windowScene;
     if (scene) {
@@ -67,9 +81,9 @@ RCT_EXPORT_MODULE(NativeDangerZone)
         case UIInterfaceOrientationPortraitUpsideDown:
           return NotchPositionBottom;
         case UIInterfaceOrientationLandscapeLeft:
-          return NotchPositionRight;  // home button left = notch right
+          return NotchPositionRight;
         case UIInterfaceOrientationLandscapeRight:
-          return NotchPositionLeft;   // home button right = notch left
+          return NotchPositionLeft;
         default:
           break;
       }
