@@ -81,7 +81,7 @@ RCT_EXPORT_MODULE(NativeDangerZone)
   return newPosition;
 }
 
-- (NotchPosition)getNotchPositionFromUIDevice:(BOOL)viewIsLandscape safeArea:(UIEdgeInsets)safeArea {
+- (NotchPosition)getNotchPositionFromUIDevice:(BOOL)viewIsLandscape window:(UIWindow *)window {
   UIDeviceOrientation orientation = UIDevice.currentDevice.orientation;
 
   switch (orientation) {
@@ -90,16 +90,31 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     case UIDeviceOrientationPortraitUpsideDown:
       return NotchPositionBottom;
     case UIDeviceOrientationLandscapeLeft:
-      // Device rotated left = notch on right side of screen
+      // Device rotated left = home button left = notch on right
       return NotchPositionRight;
     case UIDeviceOrientationLandscapeRight:
-      // Device rotated right = notch on left side of screen
+      // Device rotated right = home button right = notch on left
       return NotchPositionLeft;
     default:
-      // FaceUp, FaceDown, Unknown - use view geometry
-      if (viewIsLandscape) {
-        // In landscape, check which side has the notch via safe area
-        return (safeArea.left > safeArea.right) ? NotchPositionLeft : NotchPositionRight;
+      // FaceUp, FaceDown, Unknown - use interface orientation (works in simulator)
+      if (@available(iOS 13.0, *)) {
+        UIWindowScene *windowScene = window.windowScene;
+        if (windowScene) {
+          switch (windowScene.interfaceOrientation) {
+            case UIInterfaceOrientationPortrait:
+              return NotchPositionTop;
+            case UIInterfaceOrientationPortraitUpsideDown:
+              return NotchPositionBottom;
+            case UIInterfaceOrientationLandscapeLeft:
+              // Interface landscape left = notch on left
+              return NotchPositionLeft;
+            case UIInterfaceOrientationLandscapeRight:
+              // Interface landscape right = notch on right
+              return NotchPositionRight;
+            default:
+              break;
+          }
+        }
       }
       return _lastKnownPosition;
   }
@@ -126,12 +141,12 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     BOOL viewIsLandscape = bounds.size.width > bounds.size.height;
 
     // Try CoreMotion first (works for upside-down on real device)
-    // Fall back to UIDevice (works for simulator and basic orientations)
+    // Fall back to UIDevice/interface orientation (works for simulator)
     NotchPosition notchPosition;
     if (self->_hasMotionData || self->_motionManager.deviceMotion != nil) {
       notchPosition = [self getNotchPositionFromMotion];
     } else {
-      notchPosition = [self getNotchPositionFromUIDevice:viewIsLandscape safeArea:safeArea];
+      notchPosition = [self getNotchPositionFromUIDevice:viewIsLandscape window:window];
       self->_lastKnownPosition = notchPosition;
     }
 
