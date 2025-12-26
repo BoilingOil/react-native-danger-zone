@@ -45,6 +45,8 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     CGRect bounds = rootView.bounds;
     UIEdgeInsets safeArea = rootView.safeAreaInsets;
 
+    BOOL viewIsLandscape = bounds.size.width > bounds.size.height;
+
     // Get device orientation - use cached value if flat/unknown
     UIDeviceOrientation deviceOrientation = UIDevice.currentDevice.orientation;
     switch (deviceOrientation) {
@@ -56,12 +58,22 @@ RCT_EXPORT_MODULE(NativeDangerZone)
         self->_lastKnownOrientation = deviceOrientation;
         break;
       default:
-        // FaceUp, FaceDown, Unknown - use cached value
-        deviceOrientation = self->_lastKnownOrientation;
+        // FaceUp, FaceDown, Unknown - use cached value BUT
+        // if cached is landscape and view is portrait, the cache is stale
+        // (we transitioned through landscape to portrait/upside-down while flat)
+        if (!viewIsLandscape &&
+            (self->_lastKnownOrientation == UIDeviceOrientationLandscapeLeft ||
+             self->_lastKnownOrientation == UIDeviceOrientationLandscapeRight)) {
+          // When flat during landscape->portrait transition, we can't tell if
+          // it's normal portrait or upside-down. Default to portrait; the 50ms
+          // polling will catch the correct orientation once device tilts enough.
+          deviceOrientation = UIDeviceOrientationPortrait;
+          self->_lastKnownOrientation = UIDeviceOrientationPortrait;
+        } else {
+          deviceOrientation = self->_lastKnownOrientation;
+        }
         break;
     }
-
-    BOOL viewIsLandscape = bounds.size.width > bounds.size.height;
 
     CGFloat top = 0;
     CGFloat bottom = 0;
