@@ -7,7 +7,6 @@ static const double kHysteresis = 0.2;         // Prevents jitter at 45°
 
 typedef NS_ENUM(NSInteger, NotchPosition) {
   NotchPositionTop,
-  NotchPositionBottom,
   NotchPositionLeft,
   NotchPositionRight
 };
@@ -28,7 +27,6 @@ RCT_EXPORT_MODULE(NativeDangerZone)
       _motionManager.deviceMotionUpdateInterval = 0.05;
       [_motionManager startDeviceMotionUpdates];
     }
-    // Required for UIDevice.orientation to update (fallback for upside-down)
     [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
   }
   return self;
@@ -39,7 +37,6 @@ RCT_EXPORT_MODULE(NativeDangerZone)
   [[UIDevice currentDevice] endGeneratingDeviceOrientationNotifications];
 }
 
-// Single source of truth for notch position
 - (NotchPosition)getNotchPosition:(UIWindow *)window {
   // 1. CoreMotion (best - works for all orientations on real device)
   CMDeviceMotion *motion = _motionManager.deviceMotion;
@@ -50,20 +47,19 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     double absY = fabs(y);
 
     if (absY > absX + kHysteresis) {
-      _lastPosition = (y < 0) ? NotchPositionTop : NotchPositionBottom;
+      // Portrait (no upside-down support - Apple won't rotate iPhone apps)
+      _lastPosition = NotchPositionTop;
     } else if (absX > absY + kHysteresis) {
+      // Landscape: x > 0 = right side down = notch right
       _lastPosition = (x > 0) ? NotchPositionRight : NotchPositionLeft;
     }
     return _lastPosition;
   }
 
-  // 2. UIDevice orientation (reports upside-down on iPhone, unlike interfaceOrientation)
-  UIDeviceOrientation deviceOrient = UIDevice.currentDevice.orientation;
-  switch (deviceOrient) {
+  // 2. UIDevice orientation
+  switch (UIDevice.currentDevice.orientation) {
     case UIDeviceOrientationPortrait:
       return NotchPositionTop;
-    case UIDeviceOrientationPortraitUpsideDown:
-      return NotchPositionBottom;
     case UIDeviceOrientationLandscapeLeft:
       return NotchPositionRight;
     case UIDeviceOrientationLandscapeRight:
@@ -72,24 +68,13 @@ RCT_EXPORT_MODULE(NativeDangerZone)
       break;
   }
 
-  // 3. interfaceOrientation (simulator) - Apple refuses to report upside-down for iPhone
-  //    but we handle it anyway because fuck incomplete APIs
+  // 3. interfaceOrientation (simulator fallback)
   if (@available(iOS 13.0, *)) {
     UIWindowScene *scene = window.windowScene;
     if (scene) {
-      UIInterfaceOrientation interfaceOrient = scene.interfaceOrientation;
-
-      // Apple's interfaceOrientation for iPhone never returns PortraitUpsideDown
-      // So if UIDevice says upside-down but interface says portrait, trust UIDevice
-      if (deviceOrient == UIDeviceOrientationPortraitUpsideDown) {
-        return NotchPositionBottom;
-      }
-
-      switch (interfaceOrient) {
+      switch (scene.interfaceOrientation) {
         case UIInterfaceOrientationPortrait:
           return NotchPositionTop;
-        case UIInterfaceOrientationPortraitUpsideDown:
-          return NotchPositionBottom;  // Apple never sends this for iPhone but we're ready
         case UIInterfaceOrientationLandscapeLeft:
           return NotchPositionRight;
         case UIInterfaceOrientationLandscapeRight:
@@ -128,21 +113,17 @@ RCT_EXPORT_MODULE(NativeDangerZone)
     CGRect bounds = window.rootViewController.view.bounds;
     BOOL landscape = bounds.size.width > bounds.size.height;
 
-    // Get raw values
     CGFloat notch = landscape ? MAX(safe.left, safe.right) : safe.top;
     CGFloat home = safe.bottom;
 
-    // Apply thresholds
     if (notch < kNotchThreshold) notch = 0;
     if (home < kHomeBarThreshold) home = 0;
 
-    // Place insets based on physical notch position
     CGFloat t = 0, b = 0, l = 0, r = 0;
     switch ([self getNotchPosition:window]) {
-      case NotchPositionTop:    t = notch; b = home; break;
-      case NotchPositionBottom: b = notch; t = home; break;
-      case NotchPositionLeft:   l = notch; b = home; break;
-      case NotchPositionRight:  r = notch; b = home; break;
+      case NotchPositionTop:   t = notch; b = home; break;
+      case NotchPositionLeft:  l = notch; b = home; break;
+      case NotchPositionRight: r = notch; b = home; break;
     }
 
     result = @{@"top": @(t), @"bottom": @(b), @"left": @(l), @"right": @(r)};
