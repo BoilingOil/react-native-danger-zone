@@ -55,9 +55,10 @@ RCT_EXPORT_MODULE(NativeDangerZone)
 
   _hasMotionData = YES;
 
-  // Gravity vector points toward Earth
+  // Gravity vector points toward Earth in device coordinates
+  // Device coordinate system: y-axis points toward TOP of device
   // x: positive = right side down, negative = left side down
-  // y: positive = bottom down (normal portrait), negative = top down (upside down)
+  // y: positive = top down (upside down), negative = bottom down (normal portrait)
   double x = motion.gravity.x;
   double y = motion.gravity.y;
 
@@ -70,7 +71,7 @@ RCT_EXPORT_MODULE(NativeDangerZone)
 
   if (absY > absX + kOrientationThreshold) {
     // Clearly portrait
-    newPosition = (y > 0) ? NotchPositionTop : NotchPositionBottom;
+    newPosition = (y < 0) ? NotchPositionTop : NotchPositionBottom;
   } else if (absX > absY + kOrientationThreshold) {
     // Clearly landscape
     newPosition = (x > 0) ? NotchPositionLeft : NotchPositionRight;
@@ -106,11 +107,11 @@ RCT_EXPORT_MODULE(NativeDangerZone)
             case UIInterfaceOrientationPortraitUpsideDown:
               return NotchPositionBottom;
             case UIInterfaceOrientationLandscapeLeft:
-              // Interface landscape left = notch on left
-              return NotchPositionLeft;
-            case UIInterfaceOrientationLandscapeRight:
-              // Interface landscape right = notch on right
+              // home button left = notch on right
               return NotchPositionRight;
+            case UIInterfaceOrientationLandscapeRight:
+              // home button right = notch on left
+              return NotchPositionLeft;
             default:
               break;
           }
