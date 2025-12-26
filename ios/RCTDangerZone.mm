@@ -1,13 +1,9 @@
 #import "RCTDangerZone.h"
 #import <UIKit/UIKit.h>
 
-// Notch is ~44-59pt, home bar is ~21-34pt
-static const CGFloat kNotchThreshold = 40.0;
-static const CGFloat kHomeBarThreshold = 15.0;
-
-// Hysteresis threshold - must exceed this to change orientation
-// Prevents jitter at 45° boundaries
-static const double kOrientationThreshold = 0.2;
+static const CGFloat kNotchThreshold = 40.0;   // Notch is ~44-59pt
+static const CGFloat kHomeBarThreshold = 15.0; // Home bar is ~21-34pt
+static const double kHysteresis = 0.2;         // Prevents jitter at 45°
 
 typedef NS_ENUM(NSInteger, NotchPosition) {
   NotchPositionTop,
@@ -18,8 +14,7 @@ typedef NS_ENUM(NSInteger, NotchPosition) {
 
 @implementation RCTDangerZone {
   CMMotionManager *_motionManager;
-  NotchPosition _lastKnownPosition;
-  BOOL _hasMotionData;
+  NotchPosition _lastPosition;
 }
 
 RCT_EXPORT_MODULE(NativeDangerZone)
@@ -27,208 +22,112 @@ RCT_EXPORT_MODULE(NativeDangerZone)
 - (instancetype)init {
   self = [super init];
   if (self) {
+    _lastPosition = NotchPositionTop;
     _motionManager = [[CMMotionManager alloc] init];
-    _lastKnownPosition = NotchPositionTop;
-    _hasMotionData = NO;
-
     if (_motionManager.isDeviceMotionAvailable) {
-      _motionManager.deviceMotionUpdateInterval = 0.05; // 50ms for responsive updates
+      _motionManager.deviceMotionUpdateInterval = 0.05;
       [_motionManager startDeviceMotionUpdates];
     }
-
-    // Also enable UIDevice orientation for fallback
-    [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
   }
   return self;
 }
 
 - (void)dealloc {
   [_motionManager stopDeviceMotionUpdates];
-  [[UIDevice currentDevice] endGeneratingDeviceOrientationNotifications];
 }
 
-- (NotchPosition)getNotchPositionFromMotion {
+// Single source of truth for notch position
+- (NotchPosition)getNotchPosition:(UIWindow *)window {
+  // Try CoreMotion first (works for upside-down, real device only)
   CMDeviceMotion *motion = _motionManager.deviceMotion;
-  if (!motion) {
-    return _lastKnownPosition;
+  if (motion) {
+    double x = motion.gravity.x;
+    double y = motion.gravity.y;
+    double absX = fabs(x);
+    double absY = fabs(y);
+
+    // Only update if clearly in one orientation (hysteresis)
+    if (absY > absX + kHysteresis) {
+      // Portrait: y < 0 = normal, y > 0 = upside down
+      _lastPosition = (y < 0) ? NotchPositionTop : NotchPositionBottom;
+    } else if (absX > absY + kHysteresis) {
+      // Landscape: x > 0 = right side down = notch right, x < 0 = notch left
+      _lastPosition = (x > 0) ? NotchPositionRight : NotchPositionLeft;
+    }
+    return _lastPosition;
   }
 
-  _hasMotionData = YES;
-
-  // Gravity vector points toward Earth in device coordinates
-  // Device coordinate system: y-axis points toward TOP of device
-  // x: positive = right side down, negative = left side down
-  // y: positive = top down (upside down), negative = bottom down (normal portrait)
-  double x = motion.gravity.x;
-  double y = motion.gravity.y;
-
-  double absX = fabs(x);
-  double absY = fabs(y);
-
-  // Only change orientation if we clearly exceed threshold
-  // This prevents jitter at boundaries
-  NotchPosition newPosition = _lastKnownPosition;
-
-  if (absY > absX + kOrientationThreshold) {
-    // Clearly portrait
-    // y < 0 = bottom toward Earth = normal portrait = notch at top
-    newPosition = (y < 0) ? NotchPositionTop : NotchPositionBottom;
-  } else if (absX > absY + kOrientationThreshold) {
-    // Clearly landscape
-    // x > 0 = right side toward Earth = home button left = notch on RIGHT
-    newPosition = (x > 0) ? NotchPositionRight : NotchPositionLeft;
-  }
-  // else: in the "dead zone" near 45°, keep previous orientation
-
-  _lastKnownPosition = newPosition;
-  return newPosition;
-}
-
-- (NotchPosition)getNotchPositionFromUIDevice:(BOOL)viewIsLandscape window:(UIWindow *)window {
-  UIDeviceOrientation orientation = UIDevice.currentDevice.orientation;
-
-  switch (orientation) {
-    case UIDeviceOrientationPortrait:
-      return NotchPositionTop;
-    case UIDeviceOrientationPortraitUpsideDown:
-      return NotchPositionBottom;
-    case UIDeviceOrientationLandscapeLeft:
-      // Device rotated left = home button left = notch on right
-      return NotchPositionRight;
-    case UIDeviceOrientationLandscapeRight:
-      // Device rotated right = home button right = notch on left
-      return NotchPositionLeft;
-    default:
-      // FaceUp, FaceDown, Unknown - use interface orientation (works in simulator)
-      if (@available(iOS 13.0, *)) {
-        UIWindowScene *windowScene = window.windowScene;
-        if (windowScene) {
-          switch (windowScene.interfaceOrientation) {
-            case UIInterfaceOrientationPortrait:
-              return NotchPositionTop;
-            case UIInterfaceOrientationPortraitUpsideDown:
-              return NotchPositionBottom;
-            case UIInterfaceOrientationLandscapeLeft:
-              // home button left = notch on right
-              return NotchPositionRight;
-            case UIInterfaceOrientationLandscapeRight:
-              // home button right = notch on left
-              return NotchPositionLeft;
-            default:
-              break;
-          }
-        }
+  // Fallback: interfaceOrientation (simulator, or CoreMotion not ready)
+  if (@available(iOS 13.0, *)) {
+    UIWindowScene *scene = window.windowScene;
+    if (scene) {
+      switch (scene.interfaceOrientation) {
+        case UIInterfaceOrientationPortrait:
+          return NotchPositionTop;
+        case UIInterfaceOrientationPortraitUpsideDown:
+          return NotchPositionBottom;
+        case UIInterfaceOrientationLandscapeLeft:
+          return NotchPositionRight;  // home button left = notch right
+        case UIInterfaceOrientationLandscapeRight:
+          return NotchPositionLeft;   // home button right = notch left
+        default:
+          break;
       }
-      return _lastKnownPosition;
+    }
   }
+
+  return _lastPosition;
 }
 
 - (NSDictionary *)getInsets {
-  __block NSDictionary *result = @{
-    @"top": @0,
-    @"bottom": @0,
-    @"left": @0,
-    @"right": @0
-  };
+  __block NSDictionary *result = @{@"top": @0, @"bottom": @0, @"left": @0, @"right": @0};
 
-  void (^fetchInsets)(void) = ^{
-    UIWindow *window = [self getKeyWindow];
-    if (!window) return;
-
-    UIViewController *rootVC = window.rootViewController;
-    if (!rootVC) return;
-
-    UIView *rootView = rootVC.view;
-    CGRect bounds = rootView.bounds;
-    UIEdgeInsets safeArea = rootView.safeAreaInsets;
-    BOOL viewIsLandscape = bounds.size.width > bounds.size.height;
-
-    // Try CoreMotion first (works for upside-down on real device)
-    // Fall back to UIDevice/interface orientation (works for simulator)
-    NotchPosition notchPosition;
-    if (self->_hasMotionData || self->_motionManager.deviceMotion != nil) {
-      notchPosition = [self getNotchPositionFromMotion];
-    } else {
-      notchPosition = [self getNotchPositionFromUIDevice:viewIsLandscape window:window];
-      self->_lastKnownPosition = notchPosition;
-    }
-
-    // Calculate notch value from safe area
-    CGFloat notchValue = 0;
-    CGFloat homeBar = 0;
-
-    if (viewIsLandscape) {
-      // In landscape, notch is on left or right
-      notchValue = MAX(safeArea.left, safeArea.right);
-      homeBar = safeArea.bottom;
-    } else {
-      // In portrait, notch is top (or bottom if upside down, but iOS reports same)
-      notchValue = safeArea.top;
-      homeBar = safeArea.bottom;
-    }
-
-    // Apply thresholds
-    if (notchValue < kNotchThreshold) notchValue = 0;
-    if (homeBar < kHomeBarThreshold) homeBar = 0;
-
-    CGFloat top = 0, bottom = 0, left = 0, right = 0;
-
-    switch (notchPosition) {
-      case NotchPositionTop:
-        top = notchValue;
-        bottom = homeBar;
-        break;
-      case NotchPositionBottom:
-        bottom = notchValue;
-        top = homeBar;
-        break;
-      case NotchPositionLeft:
-        left = notchValue;
-        bottom = homeBar;
-        break;
-      case NotchPositionRight:
-        right = notchValue;
-        bottom = homeBar;
-        break;
-    }
-
-    result = @{
-      @"top": @(top),
-      @"bottom": @(bottom),
-      @"left": @(left),
-      @"right": @(right)
-    };
-  };
-
-  if ([NSThread isMainThread]) {
-    fetchInsets();
-  } else {
-    dispatch_sync(dispatch_get_main_queue(), fetchInsets);
-  }
-
-  return result;
-}
-
-- (UIWindow *)getKeyWindow {
-  if (@available(iOS 15.0, *)) {
-    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-      if ([scene isKindOfClass:[UIWindowScene class]]) {
-        UIWindowScene *windowScene = (UIWindowScene *)scene;
-        for (UIWindow *window in windowScene.windows) {
-          if (window.isKeyWindow) {
-            return window;
+  void (^work)(void) = ^{
+    UIWindow *window = nil;
+    if (@available(iOS 15.0, *)) {
+      for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if ([scene isKindOfClass:[UIWindowScene class]]) {
+          for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+            if (w.isKeyWindow) { window = w; break; }
           }
         }
+        if (window) break;
+      }
+    } else {
+      for (UIWindow *w in UIApplication.sharedApplication.windows) {
+        if (w.isKeyWindow) { window = w; break; }
       }
     }
-  } else {
-    for (UIWindow *window in UIApplication.sharedApplication.windows) {
-      if (window.isKeyWindow) {
-        return window;
-      }
+    if (!window || !window.rootViewController) return;
+
+    UIEdgeInsets safe = window.rootViewController.view.safeAreaInsets;
+    CGRect bounds = window.rootViewController.view.bounds;
+    BOOL landscape = bounds.size.width > bounds.size.height;
+
+    // Get raw values
+    CGFloat notch = landscape ? MAX(safe.left, safe.right) : safe.top;
+    CGFloat home = safe.bottom;
+
+    // Apply thresholds
+    if (notch < kNotchThreshold) notch = 0;
+    if (home < kHomeBarThreshold) home = 0;
+
+    // Place insets based on physical notch position
+    CGFloat t = 0, b = 0, l = 0, r = 0;
+    switch ([self getNotchPosition:window]) {
+      case NotchPositionTop:    t = notch; b = home; break;
+      case NotchPositionBottom: b = notch; t = home; break;
+      case NotchPositionLeft:   l = notch; b = home; break;
+      case NotchPositionRight:  r = notch; b = home; break;
     }
-  }
-  return nil;
+
+    result = @{@"top": @(t), @"bottom": @(b), @"left": @(l), @"right": @(r)};
+  };
+
+  if ([NSThread isMainThread]) work();
+  else dispatch_sync(dispatch_get_main_queue(), work);
+
+  return result;
 }
 
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
@@ -236,8 +135,6 @@ RCT_EXPORT_MODULE(NativeDangerZone)
   return std::make_shared<facebook::react::NativeDangerZoneSpecJSI>(params);
 }
 
-+ (BOOL)requiresMainQueueSetup {
-  return YES;
-}
++ (BOOL)requiresMainQueueSetup { return YES; }
 
 @end
