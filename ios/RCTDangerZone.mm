@@ -71,10 +71,12 @@ RCT_EXPORT_MODULE(NativeDangerZone)
 
   if (absY > absX + kOrientationThreshold) {
     // Clearly portrait
+    // y < 0 = bottom toward Earth = normal portrait = notch at top
     newPosition = (y < 0) ? NotchPositionTop : NotchPositionBottom;
   } else if (absX > absY + kOrientationThreshold) {
     // Clearly landscape
-    newPosition = (x > 0) ? NotchPositionLeft : NotchPositionRight;
+    // x > 0 = right side toward Earth = home button left = notch on RIGHT
+    newPosition = (x > 0) ? NotchPositionRight : NotchPositionLeft;
   }
   // else: in the "dead zone" near 45°, keep previous orientation
 
